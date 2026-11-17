@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000" id="tc">
+<title>体育館タイマー</title>
+<style>
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:#000}
+body{
+  color:#fff; overscroll-behavior:none; touch-action:manipulation;
+  font-family:Roboto,"Hiragino Sans","Yu Gothic","Segoe UI",sans-serif;
+  -webkit-tap-highlight-color:transparent; user-select:none; -webkit-user-select:none;
+}
+button{font-family:inherit;cursor:pointer}
+#app{
+  height:100dvh; display:flex; flex-direction:column;
+  padding:12px;
+  padding-top:calc(12px + env(safe-area-inset-top,0px));
+  padding-bottom:calc(12px + env(safe-area-inset-bottom,0px));
+}
+
+/* 停止中だけ表示：縦向きは場所を残し、横向きは詰める */
+@media (orientation:portrait){.away{visibility:hidden}}
+@media (orientation:landscape){.away{display:none!important}}
+
+/* モード切替 */
+.seg{display:flex;align-self:center;border:1px solid #938F99;border-radius:20px;overflow:hidden}
+.seg button{height:40px;padding:0 28px;border:0;background:none;color:#E6E0E9;font-size:16px}
+.seg button+button{border-left:1px solid #938F99}
+.seg button.on{background:#4A4458}
+
+#label{height:44px;display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:700}
+
+/* 時間表示 */
+#timeWrap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden}
+#timeWrap.tap{cursor:pointer}
+#time{
+  display:block;white-space:nowrap;line-height:1.15;font-weight:700;color:#fff;
+  font-variant-numeric:tabular-nums;font-size:100px;
+}
+
+/* 時間のリスト */
+#settings{height:60px;display:flex;overflow-x:auto;scrollbar-width:none;margin-top:4px}
+#settings::-webkit-scrollbar{display:none}
+.row{display:flex;align-items:center;margin:0 auto;flex:none}
+.chip{
+  height:52px;min-width:80px;padding:0 18px;flex:none;
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  border:1px solid #938F99;border-radius:26px;background:none;color:#fff;
+  font-size:24px;font-weight:700;
+}
+.chip svg{width:24px;height:24px;fill:currentColor}
+.chip.round{width:52px;min-width:52px;padding:0;margin-left:8px}
+.chip.rep{margin-left:20px}
+.arrow{display:inline-flex;padding:0 4px;flex:none}
+.arrow svg{width:20px;height:20px;fill:#fff}
+
+/* スタート・リセット */
+.btns{height:72px;display:flex;gap:12px;margin-top:8px}
+.btns button{flex:1;border:0;border-radius:36px;font-size:28px}
+#startBtn{background:#4CAF50;color:#000}
+#startBtn.run{background:#FF9800}
+#startBtn:disabled{background:#2a2a2a;color:#666;cursor:default}
+#resetBtn{background:#616161;color:#fff}
+button:focus-visible{outline:3px solid #fff;outline-offset:2px}
+
+/* シート */
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center;z-index:10}
+.sheet{
+  background:#2B2930;width:100%;max-width:560px;border-radius:28px 28px 0 0;
+  padding:16px 12px calc(12px + env(safe-area-inset-bottom,0px));
+}
+.wheels{display:flex;justify-content:center;gap:12px}
+.wheelwrap{position:relative;width:110px;height:220px}
+.wheelwrap.wide{width:220px}
+.wheelwrap::before{
+  content:"";position:absolute;left:0;right:0;top:88px;height:44px;
+  background:rgba(255,255,255,.12);border-radius:10px;pointer-events:none;
+}
+.wheelwrap::after{
+  content:attr(data-unit);position:absolute;top:88px;height:44px;line-height:44px;
+  left:calc(50% + 26px);color:#CAC4D0;font-size:16px;pointer-events:none;
+}
+.wl{
+  height:100%;overflow-y:scroll;scroll-snap-type:y mandatory;padding:88px 0;
+  scrollbar-width:none;-webkit-overflow-scrolling:touch;
+}
+.wl::-webkit-scrollbar{display:none}
+.wi{height:44px;line-height:44px;text-align:center;font-size:26px;scroll-snap-align:center}
+.bar{display:flex;gap:12px;margin-top:12px}
+.bar button{flex:1;height:56px;border-radius:28px;font-size:20px;border:0}
+.bar .ok{flex:2;background:#D0BCFF;color:#381E72;font-weight:700}
+.bar .del{background:none;border:1px solid #938F99;color:#D0BCFF}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="seg" id="seg">
+    <button data-m="timer">タイマー</button>
+    <button data-m="up">アップ</button>
+  </div>
+  <div id="label"></div>
+  <div id="timeWrap"><div id="time">05:00</div></div>
+  <div id="settings"></div>
+  <div class="btns">
+    <button id="startBtn">スタート</button>
+    <button id="resetBtn">リセット</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const el = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+};
+const ICON = {
+  arrow: '<svg viewBox="0 0 24 24"><path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/></svg>',
+  add: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
+  repeat: '<svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg>'
+};
+const PAL = ["#1B5E20", "#0D47A1", "#E65100", "#4A148C"]; // 緑・青・オレンジ・紫
+
+// ---- 状態 ----
+let mode = "timer";            // timer | up
+let status = "idle";           // idle | running | paused | finished
+let steps = [300];             // 時間のリスト（秒）
+let repeat = 1;                // くり返し回数（0 = 無限）
+let stepIdx = 0, lap = 1;
+let displayMs = 0;             // タイマー=残り、アップ=経過
+let anchor = 0;                // タイマー=現在の時間の終了時刻、アップ=開始時刻
+let ticker = null, flasher = null, flashOn = false, beepCount = 0;
+let lastLen = 0;
+
+function save() {
+  try { localStorage.setItem("gymtimer", JSON.stringify({ steps, repeat })); } catch (e) {}
+}
+function load() {
+  try {
+    const d = JSON.parse(localStorage.getItem("gymtimer"));
+    if (Array.isArray(d.steps) && d.steps.length &&
+        d.steps.every(n => Number.isInteger(n) && n >= 1 && n <= 3599)) steps = d.steps;
+    if (Number.isInteger(d.repeat) && d.repeat >= 0 && d.repeat <= 99) repeat = d.repeat;
+  } catch (e) {}
+  syncIdle();
+}
+function syncIdle() {
+  stepIdx = 0; lap = 1; status = "idle";
+  displayMs = mode === "up" ? 0 : steps[0] * 1000;
+}
+
+// ---- 音・画面ロック ----
+let actx = null;
+function unlockAudio() {
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === "suspended") actx.resume();
+  } catch (e) {}
+}
+function beep() {
+  try {
+    unlockAudio();
+    const t = actx.currentTime;
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = "square"; o.frequency.value = 880;
+    g.gain.setValueAtTime(0.4, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+    o.connect(g); g.connect(actx.destination);
+    o.start(t); o.stop(t + 0.3);
+  } catch (e) {}
+  if (navigator.vibrate) navigator.vibrate(200);
+}
+let wl = null;
+async function lock() { try { wl = await navigator.wakeLock.request("screen"); } catch (e) {} }
+function unlock() { try { if (wl) wl.release(); } catch (e) {} wl = null; }
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && (status === "running" || status === "finished")) lock();
+});
+
+// ---- 操作 ----
+function start() {
+  unlockAudio();
+  const now = Date.now();
+  if (mode === "up") anchor = now - displayMs;
+  else { if (displayMs <= 0) return; anchor = now + displayMs; }
+  ticker = setInterval(tick, 100);
+  lock();
+  status = "running";
+  render();
+}
+function pause() { clearInterval(ticker); unlock(); status = "paused"; render(); }
+function reset() {
+  clearInterval(ticker); clearInterval(flasher); unlock();
+  flashOn = false; syncIdle(); render();
+}
+function tick() {
+  const now = Date.now();
+  if (mode === "up") { displayMs = now - anchor; updateTime(); return; }
+  let left = anchor - now;
+  if (left > 0) { displayMs = left; updateTime(); return; }
+  while (left <= 0) {
+    const last = stepIdx === steps.length - 1;
+    if (last && repeat !== 0 && lap >= repeat) { finish(); return; }
+    if (last) { stepIdx = 0; lap++; } else stepIdx++;
+    anchor += steps[stepIdx] * 1000;
+    left = anchor - now;
+  }
+  displayMs = left;
+  beep();
+  render();
+}
+function finish() {
+  clearInterval(ticker);
+  displayMs = 0; status = "finished"; beepCount = 0;
+  flasher = setInterval(() => {
+    flashOn = !flashOn;
+    if (beepCount < 10) { beep(); beepCount++; }
+    render();
+  }, 500);
+  render();
+}
+
+// ---- 表示 ----
+const fmt = sec => String(Math.floor(sec / 60)).padStart(2, "0") + ":" + String(sec % 60).padStart(2, "0");
+function timeText() {
+  return fmt(mode === "up" ? Math.floor(displayMs / 1000) : Math.ceil(displayMs / 1000));
+}
+function labelText() {
+  if (mode !== "timer") return "";
+  if (status === "finished") return "終了";
+  const parts = [];
+  if (steps.length > 1) parts.push((stepIdx + 1) + " / " + steps.length);
+  if (repeat !== 1) parts.push(repeat === 0 ? lap + "周目" : lap + " / " + repeat + "周");
+  return parts.join("\u2003");
+}
+function bgColor() {
+  if (status === "finished") return flashOn ? "#F44336" : "#000";
+  if (mode === "timer" && status !== "idle" && steps.length > 1) return PAL[stepIdx % PAL.length];
+  return "#000";
+}
+function fit() {
+  const t = $("time"), w = $("timeWrap");
+  t.style.fontSize = "100px";
+  const k = Math.min(w.clientWidth / t.offsetWidth, w.clientHeight / t.offsetHeight);
+  if (isFinite(k) && k > 0) t.style.fontSize = (100 * k * 0.97) + "px";
+}
+function updateTime() {
+  const s = timeText();
+  $("time").textContent = s;
+  if (s.length !== lastLen) { lastLen = s.length; fit(); }
+}
+function renderSettings() {
+  const box = $("settings");
+  box.innerHTML = "";
+  if (mode !== "timer") return;
+  const row = el("div", "row");
+  steps.forEach((s, i) => {
+    if (i > 0) { const a = el("span", "arrow"); a.innerHTML = ICON.arrow; row.append(a); }
+    const b = el("button", "chip", fmt(s));
+    b.onclick = () => editStep(i);
+    row.append(b);
+  });
+  const add = el("button", "chip round");
+  add.innerHTML = ICON.add;
+  add.setAttribute("aria-label", "時間を追加");
+  add.onclick = addStep;
+  row.append(add);
+  const rep = el("button", "chip rep");
+  rep.innerHTML = ICON.repeat + "<span>" + (repeat === 0 ? "∞" : "×" + repeat) + "</span>";
+  rep.setAttribute("aria-label", "くり返し回数");
+  rep.onclick = editRepeat;
+  row.append(rep);
+  box.append(row);
+}
+function render() {
+  const idle = status === "idle", running = status === "running", fin = status === "finished";
+  const bg = bgColor();
+  document.documentElement.style.background = bg;
+  document.body.style.background = bg;
+  $("tc").setAttribute("content", bg);
+
+  $("seg").classList.toggle("away", !idle);
+  document.querySelectorAll("#seg button").forEach(b => b.classList.toggle("on", b.dataset.m === mode));
+  $("label").textContent = labelText();
+  $("settings").classList.toggle("away", !idle);
+  $("timeWrap").classList.toggle("tap", idle && mode === "timer");
+  if (idle) renderSettings();
+
+  const sb = $("startBtn");
+  sb.textContent = running ? "ストップ" : "スタート";
+  sb.classList.toggle("run", running);
+  sb.disabled = fin;
+  updateTime();
+}
+
+// ---- シート（ホイール選択） ----
+function wheel(count, index, unit, labelFn) {
+  const wrap = el("div", "wheelwrap");
+  if (unit) wrap.dataset.unit = unit;
+  const list = el("div", "wl");
+  for (let i = 0; i < count; i++) list.append(el("div", "wi", labelFn ? labelFn(i) : String(i)));
+  wrap.append(list);
+  requestAnimationFrame(() => { list.scrollTop = index * 44; });
+  return {
+    el: wrap,
+    get: () => Math.min(count - 1, Math.max(0, Math.round(list.scrollTop / 44)))
+  };
+}
+function sheet(build) {
+  return new Promise(resolve => {
+    const ov = el("div", "ov"), sh = el("div", "sheet");
+    const close = v => { ov.remove(); resolve(v); };
+    sh.append(build(close));
+    ov.append(sh);
+    ov.addEventListener("click", e => { if (e.target === ov) close(null); });
+    document.body.append(ov);
+  });
+}
+function pickDuration(sec, canDelete) {
+  sec = Math.min(3599, Math.max(1, sec));
+  return sheet(close => {
+    const box = el("div");
+    const wm = wheel(60, Math.floor(sec / 60), "分");
+    const ws = wheel(60, sec % 60, "秒");
+    const wheels = el("div", "wheels");
+    wheels.append(wm.el, ws.el);
+    const bar = el("div", "bar");
+    if (canDelete) {
+      const d = el("button", "del", "削除");
+      d.onclick = () => close(-1);
+      bar.append(d);
+    }
+    const ok = el("button", "ok", "OK");
+    ok.onclick = () => close(Math.max(1, wm.get() * 60 + ws.get()));
+    bar.append(ok);
+    box.append(wheels, bar);
+    return box;
+  });
+}
+function pickRepeat(current) {
+  return sheet(close => {
+    const box = el("div");
+    const w = wheel(100, current, null, i => i === 0 ? "∞ 無限" : i + " 回");
+    w.el.classList.add("wide");
+    const wheels = el("div", "wheels");
+    wheels.append(w.el);
+    const bar = el("div", "bar");
+    const ok = el("button", "ok", "OK");
+    ok.onclick = () => close(w.get());
+    bar.append(ok);
+    box.append(wheels, bar);
+    return box;
+  });
+}
+
+async function editStep(i) {
+  const r = await pickDuration(steps[i], steps.length > 1);
+  if (r === null) return;
+  if (r < 0) steps.splice(i, 1); else steps[i] = r;
+  syncIdle(); save(); render();
+}
+async function addStep() {
+  const r = await pickDuration(steps[steps.length - 1], false);
+  if (r === null || r < 0) return;
+  steps.push(r);
+  syncIdle(); save(); render();
+}
+async function editRepeat() {
+  const r = await pickRepeat(repeat);
+  if (r === null) return;
+  repeat = r;
+  syncIdle(); save(); render();
+}
+
+// ---- イベント ----
+document.querySelectorAll("#seg button").forEach(b => {
+  b.onclick = () => { mode = b.dataset.m; syncIdle(); render(); };
+});
+$("startBtn").onclick = () => (status === "running" ? pause() : start());
+$("resetBtn").onclick = reset;
+$("timeWrap").onclick = () => { if (status === "idle" && mode === "timer") editStep(0); };
+new ResizeObserver(fit).observe($("timeWrap"));
+
+load();
+render();
+</script>
+</body>
+</html>
