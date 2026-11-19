@@ -134,7 +134,7 @@ let repeat = 1;                // くり返し回数（0 = 無限）
 let stepIdx = 0, lap = 1;
 let displayMs = 0;             // タイマー=残り、アップ=経過
 let anchor = 0;                // タイマー=現在の時間の終了時刻、アップ=開始時刻
-let ticker = null, flasher = null, flashOn = false, beepCount = 0;
+let ticker = null, flasher = null, flashOn = false;
 let lastLen = 0;
 
 function save() {
@@ -156,11 +156,40 @@ function syncIdle() {
 
 // ---- 音・画面ロック ----
 let actx = null;
+let finishBuf = null;
+const FINISH_SEC = 3;   // Finish.mp3 は最初の3秒だけ流す
+function getCtx() {
+  try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+  return actx;
+}
 function unlockAudio() {
   try {
-    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-    if (actx.state === "suspended") actx.resume();
+    const c = getCtx();
+    if (c && c.state === "suspended") c.resume();
   } catch (e) {}
+}
+async function loadFinish() {
+  try {
+    const c = getCtx();
+    if (!c) return;
+    const r = await fetch("Finish.mp3");
+    finishBuf = await c.decodeAudioData(await r.arrayBuffer());
+  } catch (e) {}
+}
+function playFinish() {
+  if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+  if (!actx || !finishBuf) { beep(); return; }   // 読み込めなかったときは、ピッ
+  try {
+    unlockAudio();
+    const t = actx.currentTime;
+    const d = Math.min(FINISH_SEC, finishBuf.duration);
+    const src = actx.createBufferSource(), g = actx.createGain();
+    src.buffer = finishBuf;
+    g.gain.setValueAtTime(1, Math.max(t, t + d - 0.3));   // 最後の0.3秒でフェードアウト
+    g.gain.linearRampToValueAtTime(0, t + d);
+    src.connect(g); g.connect(actx.destination);
+    src.start(t, 0, d);
+  } catch (e) { beep(); }
 }
 function beep() {
   try {
@@ -216,12 +245,9 @@ function tick() {
 }
 function finish() {
   clearInterval(ticker);
-  displayMs = 0; status = "finished"; beepCount = 0;
-  flasher = setInterval(() => {
-    flashOn = !flashOn;
-    if (beepCount < 10) { beep(); beepCount++; }
-    render();
-  }, 500);
+  displayMs = 0; status = "finished";
+  playFinish();
+  flasher = setInterval(() => { flashOn = !flashOn; render(); }, 500);
   render();
 }
 
@@ -386,6 +412,7 @@ $("resetBtn").onclick = reset;
 $("timeWrap").onclick = () => { if (status === "idle" && mode === "timer") editStep(0); };
 new ResizeObserver(fit).observe($("timeWrap"));
 
+loadFinish();
 load();
 render();
 </script>
